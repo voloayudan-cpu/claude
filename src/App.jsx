@@ -187,6 +187,18 @@ function App() {
                   >
                     📊 数据统计
                   </button>
+                  <button
+                    className={`tab ${activeTab === 'ai-advice' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('ai-advice')}
+                  >
+                    🤖 AI健康建议
+                  </button>
+                  <button
+                    className={`tab ${activeTab === 'family' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('family')}
+                  >
+                    👨‍👩‍👧‍👦 家人共享
+                  </button>
                 </nav>
 
                 <div className="tab-content">
@@ -221,6 +233,14 @@ function App() {
 
                   {activeTab === 'stats' && (
                     <Statistics userId={user.userId} />
+                  )}
+
+                  {activeTab === 'ai-advice' && (
+                    <AIAdvice userId={user.userId} />
+                  )}
+
+                  {activeTab === 'family' && (
+                    <FamilySharing userId={user.userId} />
                   )}
                 </div>
               </>
@@ -480,6 +500,441 @@ function Timeline({ pregnancyWeeks, pregnancyInfo, userId, onUpdate }) {
               <p>宝宝随时可能出生</p>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AIAdvice({ userId }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedType, setSelectedType] = useState('daily');
+
+  useEffect(() => {
+    fetchSuggestions();
+  }, []);
+
+  const fetchSuggestions = async () => {
+    try {
+      const response = await fetch(`/api/ai-suggestions/${userId}`);
+      const data = await response.json();
+      setSuggestions(data);
+    } catch (error) {
+      console.error('获取AI建议失败:', error);
+    }
+  };
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/ai-suggestions/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          suggestionType: selectedType,
+          contextData: { date: new Date().toISOString() }
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        fetchSuggestions();
+        alert('AI建议生成成功！');
+      }
+    } catch (error) {
+      alert('生成失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMarkAsRead = async (suggestionId) => {
+    try {
+      await fetch(`/api/ai-suggestions/${suggestionId}/read`, {
+        method: 'PUT'
+      });
+      fetchSuggestions();
+    } catch (error) {
+      console.error('标记失败:', error);
+    }
+  };
+
+  const getTypeLabel = (type) => {
+    const labels = {
+      daily: '📅 日常建议',
+      health: '💓 健康建议',
+      nutrition: '🥗 营养建议',
+      exercise: '🏃 运动建议',
+      mental: '😌 心理建议'
+    };
+    return labels[type] || type;
+  };
+
+  return (
+    <div className="ai-advice-container">
+      <h2>🤖 AI健康建议</h2>
+
+      <div className="ai-controls">
+        <div className="ai-type-selector">
+          <label>选择建议类型：</label>
+          <select
+            value={selectedType}
+            onChange={(e) => setSelectedType(e.target.value)}
+          >
+            <option value="daily">📅 日常建议</option>
+            <option value="health">💓 健康建议</option>
+            <option value="nutrition">🥗 营养建议</option>
+            <option value="exercise">🏃 运动建议</option>
+            <option value="mental">😌 心理建议</option>
+          </select>
+        </div>
+        <button
+          className="generate-btn"
+          onClick={handleGenerate}
+          disabled={loading}
+        >
+          {loading ? '生成中...' : '✨ 生成建议'}
+        </button>
+      </div>
+
+      <div className="suggestions-list">
+        {suggestions.map((suggestion) => (
+          <div
+            key={suggestion.id}
+            className={`suggestion-card ${suggestion.is_read ? 'read' : 'unread'}`}
+          >
+            <div className="suggestion-header">
+              <span className="suggestion-type">
+                {getTypeLabel(suggestion.suggestion_type)}
+              </span>
+              <span className="suggestion-date">
+                {new Date(suggestion.created_at).toLocaleString('zh-CN')}
+              </span>
+            </div>
+            <div className="suggestion-content">
+              {suggestion.suggestion_content}
+            </div>
+            {!suggestion.is_read && (
+              <button
+                className="mark-read-btn"
+                onClick={() => handleMarkAsRead(suggestion.id)}
+              >
+                ✓ 标记为已读
+              </button>
+            )}
+          </div>
+        ))}
+
+        {suggestions.length === 0 && (
+          <div className="empty-state">
+            <p>还没有AI建议，点击"生成建议"获取个性化健康建议！</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FamilySharing({ userId }) {
+  const [familyMembers, setFamilyMembers] = useState([]);
+  const [sharedData, setSharedData] = useState([]);
+  const [sharedHealth, setSharedHealth] = useState([]);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [newMember, setNewMember] = useState({
+    username: '',
+    relationshipType: 'spouse',
+    canView: true,
+    canEdit: false
+  });
+  const [allUsers, setAllUsers] = useState([]);
+
+  useEffect(() => {
+    fetchFamilyMembers();
+    fetchSharedData();
+    fetchAllUsers();
+  }, []);
+
+  const fetchFamilyMembers = async () => {
+    try {
+      const response = await fetch(`/api/family-members/${userId}`);
+      const data = await response.json();
+      setFamilyMembers(data);
+    } catch (error) {
+      console.error('获取家庭成员失败:', error);
+    }
+  };
+
+  const fetchSharedData = async () => {
+    try {
+      const [dataRes, healthRes] = await Promise.all([
+        fetch(`/api/shared-data/${userId}`),
+        fetch(`/api/shared-health/${userId}`)
+      ]);
+
+      const data = await dataRes.json();
+      const health = await healthRes.json();
+
+      setSharedData(data);
+      setSharedHealth(health);
+    } catch (error) {
+      console.error('获取共享数据失败:', error);
+    }
+  };
+
+  const fetchAllUsers = async () => {
+    try {
+      const response = await fetch('/api/users');
+      const data = await response.json();
+      setAllUsers(data);
+    } catch (error) {
+      console.error('获取用户列表失败:', error);
+    }
+  };
+
+  const handleAddMember = async () => {
+    const relatedUser = allUsers.find(u => u.username === newMember.username);
+    if (!relatedUser) {
+      alert('用户不存在');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/family-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primaryUserId: userId,
+          relatedUserId: relatedUser.id,
+          relationshipType: newMember.relationshipType,
+          canView: newMember.canView,
+          canEdit: newMember.canEdit
+        })
+      });
+
+      if (response.ok) {
+        alert('添加成功！');
+        fetchFamilyMembers();
+        setShowAddMember(false);
+        setNewMember({
+          username: '',
+          relationshipType: 'spouse',
+          canView: true,
+          canEdit: false
+        });
+      } else {
+        alert('添加失败');
+      }
+    } catch (error) {
+      alert('添加失败');
+    }
+  };
+
+  const handleRemoveMember = async (relationshipId) => {
+    if (!confirm('确定要移除这位家庭成员吗？')) return;
+
+    try {
+      await fetch(`/api/family-members/${relationshipId}`, {
+        method: 'DELETE'
+      });
+      fetchFamilyMembers();
+    } catch (error) {
+      alert('删除失败');
+    }
+  };
+
+  const getRelationshipLabel = (type) => {
+    const labels = {
+      spouse: '💑 配偶',
+      parent: '👨‍👩 父母',
+      sibling: '👫 兄弟姐妹',
+      friend: '🤝 朋友',
+      other: '👤 其他'
+    };
+    return labels[type] || type;
+  };
+
+  return (
+    <div className="family-sharing-container">
+      <h2>👨‍👩‍👧‍👦 家人共享</h2>
+
+      <div className="family-section">
+        <div className="section-header">
+          <h3>家庭成员</h3>
+          <button
+            className="add-member-btn"
+            onClick={() => setShowAddMember(!showAddMember)}
+          >
+            {showAddMember ? '取消' : '+ 添加成员'}
+          </button>
+        </div>
+
+        {showAddMember && (
+          <div className="add-member-form">
+            <div className="form-group">
+              <label>用户名</label>
+              <input
+                type="text"
+                value={newMember.username}
+                onChange={(e) => setNewMember({ ...newMember, username: e.target.value })}
+                placeholder="输入要添加的用户名"
+              />
+            </div>
+            <div className="form-group">
+              <label>关系</label>
+              <select
+                value={newMember.relationshipType}
+                onChange={(e) => setNewMember({ ...newMember, relationshipType: e.target.value })}
+              >
+                <option value="spouse">💑 配偶</option>
+                <option value="parent">👨‍👩 父母</option>
+                <option value="sibling">👫 兄弟姐妹</option>
+                <option value="friend">🤝 朋友</option>
+                <option value="other">👤 其他</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={newMember.canView}
+                  onChange={(e) => setNewMember({ ...newMember, canView: e.target.checked })}
+                />
+                允许查看我的记录
+              </label>
+            </div>
+            <div className="form-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={newMember.canEdit}
+                  onChange={(e) => setNewMember({ ...newMember, canEdit: e.target.checked })}
+                />
+                允许编辑我的记录
+              </label>
+            </div>
+            <button className="submit-btn" onClick={handleAddMember}>
+              添加成员
+            </button>
+          </div>
+        )}
+
+        <div className="family-list">
+          {familyMembers.map((member) => (
+            <div key={member.id} className="family-member-card">
+              <div className="member-info">
+                <span className="member-name">{member.username}</span>
+                <span className="member-relationship">
+                  {getRelationshipLabel(member.relationship_type)}
+                </span>
+              </div>
+              <div className="member-permissions">
+                {member.can_view && <span className="permission-tag">👁️ 可查看</span>}
+                {member.can_edit && <span className="permission-tag">✏️ 可编辑</span>}
+              </div>
+              <button
+                className="remove-member-btn"
+                onClick={() => handleRemoveMember(member.id)}
+              >
+                移除
+              </button>
+            </div>
+          ))}
+
+          {familyMembers.length === 0 && (
+            <div className="empty-state">
+              <p>还没有添加家庭成员，点击"添加成员"邀请家人一起关注孕期健康！</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="family-section">
+        <h3>共享的每日记录</h3>
+        <div className="shared-data-list">
+          {sharedData.map((record) => (
+            <div key={record.id} className="shared-record-card">
+              <div className="shared-header">
+                <span className="shared-by">👤 {record.shared_by}</span>
+                <span className="shared-date">{record.record_date}</span>
+              </div>
+              {record.symptoms && (
+                <div className="shared-item">
+                  <span className="shared-label">症状：</span>
+                  <span className="shared-value">{record.symptoms}</span>
+                </div>
+              )}
+              {record.mood && (
+                <div className="shared-item">
+                  <span className="shared-label">心情：</span>
+                  <span className="shared-value">{record.mood}</span>
+                </div>
+              )}
+              {record.weight && (
+                <div className="shared-item">
+                  <span className="shared-label">体重：</span>
+                  <span className="shared-value">{record.weight} kg</span>
+                </div>
+              )}
+              {record.notes && (
+                <div className="shared-item">
+                  <span className="shared-label">备注：</span>
+                  <span className="shared-value">{record.notes}</span>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {sharedData.length === 0 && (
+            <div className="empty-state">
+              <p>还没有共享的每日记录</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="family-section">
+        <h3>共享的健康监测</h3>
+        <div className="shared-health-list">
+          {sharedHealth.map((record) => (
+            <div key={record.id} className="shared-health-card">
+              <div className="shared-header">
+                <span className="shared-by">👤 {record.shared_by}</span>
+                <span className="shared-date">{record.record_date}</span>
+              </div>
+              {record.fetal_movement && (
+                <div className="shared-item">
+                  <span className="shared-label">胎动：</span>
+                  <span className="shared-value">{record.fetal_movement} 次</span>
+                </div>
+              )}
+              {record.blood_pressure && (
+                <div className="shared-item">
+                  <span className="shared-label">血压：</span>
+                  <span className="shared-value">{record.blood_pressure}</span>
+                </div>
+              )}
+              {record.blood_sugar && (
+                <div className="shared-item">
+                  <span className="shared-label">血糖：</span>
+                  <span className="shared-value">{record.blood_sugar}</span>
+                </div>
+              )}
+              {record.medication && (
+                <div className="shared-item">
+                  <span className="shared-label">用药：</span>
+                  <span className="shared-value">{record.medication}</span>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {sharedHealth.length === 0 && (
+            <div className="empty-state">
+              <p>还没有共享的健康监测记录</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

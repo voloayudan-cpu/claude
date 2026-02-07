@@ -108,6 +108,33 @@ function initDatabase() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
       )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS user_relationships (
+        id TEXT PRIMARY KEY,
+        primary_user_id TEXT NOT NULL,
+        related_user_id TEXT NOT NULL,
+        relationship_type TEXT NOT NULL,
+        can_view INTEGER DEFAULT 1,
+        can_edit INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (primary_user_id) REFERENCES users(id),
+        FOREIGN KEY (related_user_id) REFERENCES users(id)
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS ai_suggestions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        suggestion_type TEXT NOT NULL,
+        suggestion_content TEXT NOT NULL,
+        context_data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        is_read INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
     `, () => {
       db.get('SELECT id FROM users WHERE username = ?', ['admin'], (err, row) => {
         if (!row) {
@@ -170,6 +197,12 @@ app.post('/api/login', (req, res) => {
     } else {
       res.status(401).json({ error: '用户名或密码错误' });
     }
+  });
+});
+
+app.get('/api/users', (req, res) => {
+  db.all('SELECT id, username FROM users WHERE username != ?', ['admin'], (err, rows) => {
+    res.json(rows);
   });
 });
 
@@ -455,6 +488,191 @@ app.get('/api/fetal-movement/:userId', (req, res) => {
     res.json(rows);
   });
 });
+
+app.get('/api/ai-suggestions/:userId', (req, res) => {
+  const { userId } = req.params;
+  db.all('SELECT * FROM ai_suggestions WHERE user_id = ? ORDER BY created_at DESC', [userId], (err, rows) => {
+    res.json(rows);
+  });
+});
+
+app.post('/api/ai-suggestions/generate', async (req, res) => {
+  const { userId, suggestionType, contextData } = req.body;
+  
+  if (!userId || !suggestionType) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+
+  try {
+    let suggestionContent = '';
+    
+    switch(suggestionType) {
+      case 'daily':
+        suggestionContent = generateDailyAdvice(contextData);
+        break;
+      case 'health':
+        suggestionContent = generateHealthAdvice(contextData);
+        break;
+      case 'nutrition':
+        suggestionContent = generateNutritionAdvice(contextData);
+        break;
+      case 'exercise':
+        suggestionContent = generateExerciseAdvice(contextData);
+        break;
+      case 'mental':
+        suggestionContent = generateMentalAdvice(contextData);
+        break;
+      default:
+        suggestionContent = '根据您的孕期情况，建议保持良好的作息习惯，定期进行产检，如有不适请及时就医。';
+    }
+
+    const suggestionId = uuidv4();
+    db.run('INSERT INTO ai_suggestions (id, user_id, suggestion_type, suggestion_content, context_data) VALUES (?, ?, ?, ?, ?)',
+      [suggestionId, userId, suggestionType, suggestionContent, JSON.stringify(contextData)], (err) => {
+        if (err) {
+          res.status(500).json({ error: '生成建议失败' });
+        } else {
+          res.json({ success: true, suggestion: { id: suggestionId, suggestion_type: suggestionType, suggestion_content: suggestionContent } });
+        }
+      });
+  } catch (error) {
+    res.status(500).json({ error: '生成建议失败' });
+  }
+});
+
+app.put('/api/ai-suggestions/:suggestionId/read', (req, res) => {
+  const { suggestionId } = req.params;
+  
+  db.run('UPDATE ai_suggestions SET is_read = 1 WHERE id = ?', [suggestionId], (err) => {
+    if (err) {
+      res.status(500).json({ error: '操作失败' });
+    } else {
+      res.json({ success: true });
+    }
+  });
+});
+
+app.get('/api/family-members/:userId', (req, res) => {
+  const { userId } = req.params;
+  
+  db.all(`SELECT ur.*, u.username 
+          FROM user_relationships ur 
+          JOIN users u ON ur.related_user_id = u.id 
+          WHERE ur.primary_user_id = ?`, [userId], (err, rows) => {
+    res.json(rows);
+  });
+});
+
+app.post('/api/family-members', (req, res) => {
+  const { primaryUserId, relatedUserId, relationshipType, canView, canEdit } = req.body;
+  
+  if (!primaryUserId || !relatedUserId || !relationshipType) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+
+  const relationshipId = uuidv4();
+  db.run('INSERT INTO user_relationships (id, primary_user_id, related_user_id, relationship_type, can_view, can_edit) VALUES (?, ?, ?, ?, ?, ?)',
+    [relationshipId, primaryUserId, relatedUserId, relationshipType, canView ? 1 : 0, canEdit ? 1 : 0], (err) => {
+      if (err) {
+        res.status(500).json({ error: '添加家庭成员失败' });
+      } else {
+        res.json({ success: true, relationshipId });
+      }
+    });
+});
+
+app.delete('/api/family-members/:relationshipId', (req, res) => {
+  const { relationshipId } = req.params;
+  
+  db.run('DELETE FROM user_relationships WHERE id = ?', [relationshipId], (err) => {
+    if (err) {
+      res.status(500).json({ error: '删除失败' });
+    } else {
+      res.json({ success: true });
+    }
+  });
+});
+
+app.get('/api/shared-data/:userId', (req, res) => {
+  const { userId } = req.params;
+  
+  db.all(`SELECT dr.*, u.username as shared_by
+          FROM daily_records dr
+          JOIN user_relationships ur ON dr.user_id = ur.related_user_id
+          JOIN users u ON dr.user_id = u.id
+          WHERE ur.primary_user_id = ? AND ur.can_view = 1
+          ORDER BY dr.record_date DESC`, [userId], (err, rows) => {
+    res.json(rows);
+  });
+});
+
+app.get('/api/shared-health/:userId', (req, res) => {
+  const { userId } = req.params;
+  
+  db.all(`SELECT hm.*, u.username as shared_by
+          FROM health_monitoring hm
+          JOIN user_relationships ur ON hm.user_id = ur.related_user_id
+          JOIN users u ON hm.user_id = u.id
+          WHERE ur.primary_user_id = ? AND ur.can_view = 1
+          ORDER BY hm.record_date DESC`, [userId], (err, rows) => {
+    res.json(rows);
+  });
+});
+
+function generateDailyAdvice(context) {
+  const advice = [
+    '建议每天保持8-10小时的充足睡眠，午间可以适当休息30分钟。',
+    '每天进行30分钟的温和运动，如散步、孕妇瑜伽等。',
+    '保持均衡饮食，多吃新鲜蔬菜水果，补充叶酸和铁质。',
+    '多喝水，每天至少8杯水，保持身体水分平衡。',
+    '避免长时间站立或坐着，每小时起来活动一下。'
+  ];
+  return advice[Math.floor(Math.random() * advice.length)];
+}
+
+function generateHealthAdvice(context) {
+  const advice = [
+    '定期监测血压，保持血压在正常范围内。',
+    '注意胎动情况，每天固定时间数胎动，如有异常及时就医。',
+    '按时进行产检，不要错过任何一次检查。',
+    '注意个人卫生，预防感染。',
+    '避免接触有害物质，如烟草、酒精、化学药品等。'
+  ];
+  return advice[Math.floor(Math.random() * advice.length)];
+}
+
+function generateNutritionAdvice(context) {
+  const advice = [
+    '每天摄入足够的蛋白质，如鸡蛋、牛奶、瘦肉、豆类等。',
+    '补充叶酸，预防胎儿神经管畸形。',
+    '多吃富含铁的食物，预防贫血。',
+    '适量摄入钙质，促进胎儿骨骼发育。',
+    '控制糖分摄入，预防妊娠糖尿病。'
+  ];
+  return advice[Math.floor(Math.random() * advice.length)];
+}
+
+function generateExerciseAdvice(context) {
+  const advice = [
+    '适合孕妇的运动包括散步、孕妇瑜伽、游泳等。',
+    '避免剧烈运动和跳跃性运动。',
+    '运动时注意心率，不要超过140次/分钟。',
+    '运动前要热身，运动后要拉伸。',
+    '如有不适，立即停止运动并咨询医生。'
+  ];
+  return advice[Math.floor(Math.random() * advice.length)];
+}
+
+function generateMentalAdvice(context) {
+  const advice = [
+    '保持积极乐观的心态，对胎儿发育有益。',
+    '可以听舒缓的音乐，放松心情。',
+    '与家人朋友多交流，分享孕期感受。',
+    '学习育儿知识，为宝宝的到来做好准备。',
+    '如有焦虑情绪，及时寻求专业帮助。'
+  ];
+  return advice[Math.floor(Math.random() * advice.length)];
+}
 
 app.listen(PORT, () => {
   console.log(`服务器运行在 http://localhost:${PORT}`);
