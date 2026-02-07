@@ -1,49 +1,37 @@
 @echo off
-chcp 65001 > nul
+chcp 65001 >nul
 echo ========================================
-echo   Git 自动化推送脚本
+echo 自动推送到 GitHub
 echo ========================================
 echo.
 
-echo [1/4] 添加所有更改...
-git add .
-if %errorlevel% neq 0 (
-    echo [错误] 添加文件失败
-    pause
-    exit /b 1
-)
-echo [成功] 文件已添加
+cd /d "%~dp0"
+
+echo 检查 Git 状态...
+git status
 echo.
 
-echo [2/4] 提交更改...
-set /p commit_msg="请输入提交信息（默认：Update project）: "
-if "%commit_msg%"=="" set commit_msg=Update project
-
-git commit -m "%commit_msg%"
-if %errorlevel% neq 0 (
-    echo [错误] 提交失败
-    pause
-    exit /b 1
-)
-echo [成功] 已提交: %commit_msg%
-echo.
-
-echo [3/4] 推送到GitHub...
+echo 正在推送到 GitHub...
 git push origin main
-if %errorlevel% neq 0 (
-    echo [警告] 推送失败，可能是网络问题
-    echo 请检查网络连接后重试
-    pause
-    exit /b 1
-)
-echo [成功] 已推送到GitHub
-echo.
 
-echo ========================================
-echo   推送完成！
-echo ========================================
-echo.
-echo 您的代码已成功推送到:
-echo https://github.com/voloayudan-cpu/claude.git
+if %errorlevel% equ 0 (
+    echo.
+    echo ========================================
+    echo ✅ 推送成功！
+    echo ========================================
+) else (
+    echo.
+    echo ========================================
+    echo ❌ 推送失败，请检查网络连接
+    echo ========================================
+    echo.
+    echo 可能的原因：
+    echo 1. 网络连接不稳定
+    echo 2. GitHub 服务暂时不可用
+    echo 3. 需要身份验证
+    echo.
+    echo 请稍后重试或检查网络设置
+)
+
 echo.
 pause
