@@ -263,7 +263,7 @@ app.post('/api/daily-record', (req, res) => {
         });
     } else {
       const recordId = uuidv4();
-      db.run('INSERT INTO daily_records (id, user_id, record_date, symptoms, mood, weight, diet, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      db.run('INSERT INTO daily_records (id, user_id, record_date, symptoms, mood, weight, diet, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [recordId, userId, recordDate, symptoms, mood, weight, diet, notes], (err) => {
           if (err) {
             res.status(500).json({ error: '保存失败' });
@@ -312,7 +312,7 @@ app.post('/api/health-monitoring', (req, res) => {
         });
     } else {
       const recordId = uuidv4();
-      db.run('INSERT INTO health_monitoring (id, user_id, record_date, fetal_movement, blood_pressure, blood_sugar, medication) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      db.run('INSERT INTO health_monitoring (id, user_id, record_date, fetal_movement, blood_pressure, blood_sugar, medication) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [recordId, userId, recordDate, fetalMovement, bloodPressure, bloodSugar, medication], (err) => {
           if (err) {
             res.status(500).json({ error: '保存失败' });
